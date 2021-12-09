@@ -30,7 +30,7 @@ module.exports = {
         },
         matic: {
             url: "https://polygon-rpc.com/",
-            // url: "https://polygon-mainnet.infura.io/v3/86697059435b46dfa862f1a51b568b41",
+            // url: "https://polygon-mainnet.infura.io/v3/API_KEY",
             accounts: [PRIVATE_KEY]
         },
     },
