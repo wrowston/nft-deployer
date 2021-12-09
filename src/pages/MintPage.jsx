@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
-import { ContractFactory } from 'ethers';
+import { Contract, utils } from 'ethers';
+
+import { multihash } from 'is-ipfs';
 
 import { withRouter, RouteComponentProps } from "react-router";
 
@@ -20,7 +22,7 @@ import { useEtherBalance, useEthers } from '@usedapp/core'
 import { formatEther } from '@ethersproject/units'
 
 import { getEtherscanLink } from '../utils';
-import { ERC721ABI, ERC721ByteCode } from '../utils/constants';
+import { ERC721ABI } from '../utils/constants';
 
 const useStyles = makeStyles({
     root: {
@@ -41,29 +43,41 @@ const useStyles = makeStyles({
     },
     paper: {
         padding: 15,
+        marginBottom: 40
     }
 });
 
-interface Values {
-    name: string;
-    symbol: string;
-}
+// interface Values {
+//     contractAddress: string;
+//     hash: string;
+//     mintToAddress: string;
+// }
 
-const DeployPage = (props: RouteComponentProps) => {
+// interface IMintProps {
+//     tokenAddress: string
+// }
+
+const MintPage = (props) => {
     const classes = useStyles();
 
-    const { history } = props;
+    const { history, tokenAddress } = props;
     
-    const { activateBrowserWallet, account, library, chainId } = useEthers()
+    const { activateBrowserWallet, deactivate, account, library, chainId, connector } = useEthers()
 
     const [ isAwaitingMetaMaskConfirmation, setIsAwaitingMetaMaskConfirmation ] = useState(false)
-    const [ pendingContractDeploymentTransaction, setPendingContractDeploymentTransaction ] = useState<boolean | string>(false)
-    const [ contractDeploymentSuccessful, setContractDeploymentSuccessful] = useState<boolean | string>(false)
+    const [ pendingMintTransaction, setPendingMintTransaction ] = useState(false)
+    const [ mintTransactionSuccessful, setMintTransactionSuccessful] = useState(false)
+    const [ currentKey, setCurrentKey ] = useState(0)
 
     const userBalance = useEtherBalance(account)
 
+    useEffect(() => {
+        setCurrentKey(currentKey + 1);
+        setMintTransactionSuccessful(false);
+    }, [tokenAddress])
+
     return (
-        <Container className={classes.container} maxWidth="md">
+        <Container className={classes.container} maxWidth="md" key={currentKey}>
             <div className="button-container">
                 {!account &&
                     <Button className={classes.connectionButton} color="primary" variant="contained" onClick={() => activateBrowserWallet()}>Connect</Button>
@@ -98,88 +112,100 @@ const DeployPage = (props: RouteComponentProps) => {
             {account && (
             <>
             <Paper className={classes.paper}>
-            <h1 style={{marginTop: 0, paddingTop: 0}}>Deploy ERC721 NFT Contract</h1>
+            <h1 style={{marginTop: 0, paddingTop: 0}}>Mint ERC721 NFT</h1>
             <Formik
                 initialValues={{
-                    name: '',
-                    symbol: '',
+                    hash: '',
+                    contractAddress: tokenAddress,
+                    mintToAddress: '',
                 }}
                 validate={values => {
-                    const errors: Partial<Values> = {};
-                    console.log('runs validation')
-                    if (!values.name) {
-                        errors.name = 'Required';
-                    } else if (values.name.length < 3) {
-                        errors.name = 'Length of name must be more than 3 characters';
-                    } else if (values.name.length > 15) {
-                        errors.name = 'Length of name must be 15 or less characters';
+                    const errors = {};
+                    console.log({values})
+                    if (!values.contractAddress) {
+                        errors.contractAddress = 'Required';
+                    } else if(!utils.isAddress(values.contractAddress)) {
+                        errors.contractAddress = 'Invalid contract address';
                     }
-                    if (!values.symbol) {
-                        errors.symbol = 'Required';
-                    } else if (values.symbol.length > 10) {
-                        errors.symbol = 'Length of symbol must be 10 or less characters';
+                    if (!values.hash) {
+                        errors.hash = 'Required';
+                    } else if(!multihash(values.hash)) {
+                        errors.hash = 'Invalid IPFS Multihash';
+                    }
+                    if (!values.mintToAddress) {
+                        errors.mintToAddress = 'Required';
+                    } else if(!utils.isAddress(values.mintToAddress)) {
+                        errors.mintToAddress = 'Invalid destination address';
                     }
                     return errors;
                 }}
                 onSubmit={async (values, { setSubmitting }) => {
                     if(library) {
                         try {
-                        const signer = library.getSigner()
-                        const factory = new ContractFactory(ERC721ABI, ERC721ByteCode, signer)
-                        console.log({factory})
+                            const signer = library.getSigner()
+                            const contract = new Contract(values.contractAddress, ERC721ABI, signer);
 
-                        setIsAwaitingMetaMaskConfirmation(true);
+                            setIsAwaitingMetaMaskConfirmation(true);
 
-                        let contract = await factory.deploy(values.name, values.symbol);
-                        
-                        setIsAwaitingMetaMaskConfirmation(false);
+                            let transactionResponse = await contract.mint(values.mintToAddress, `ipfs://${values.hash}`)
 
-                        let transactionHash = contract.deployTransaction.hash;
+                            setIsAwaitingMetaMaskConfirmation(false);
 
-                        setPendingContractDeploymentTransaction(transactionHash);
+                            let transactionHash = transactionResponse.hash;
 
-                        await contract.deployTransaction.wait();
+                            setPendingMintTransaction(transactionHash);
 
-                        setSubmitting(false);
-                        setPendingContractDeploymentTransaction(false);
-                        setContractDeploymentSuccessful(contract.address);
+                            await transactionResponse.wait();
+
+                            setSubmitting(false);
+                            setPendingMintTransaction(false);
+                            setMintTransactionSuccessful(transactionHash);
 
                         }catch(error){
+                            console.log({error})
                             setSubmitting(false);
                             setIsAwaitingMetaMaskConfirmation(false);
-                            setPendingContractDeploymentTransaction(false);
-                            setContractDeploymentSuccessful(false);
-                            console.log({error})
+                            setPendingMintTransaction(false);
+                            setMintTransactionSuccessful(false);
                         }
                     }
                 }}
                 >
                 {({ submitForm, isSubmitting }) => (
                     <Form>
-                        {!contractDeploymentSuccessful &&
+                        {!mintTransactionSuccessful &&
                             <>
                                 <Field
                                     component={TextField}
-                                    name="name"
-                                    type="name"
-                                    label="Name"
-                                    helperText="Full NFT contract/series name e.g. CRYPTOPUNKS"
+                                    name="contractAddress"
+                                    type="text"
+                                    label="Contract Address"
+                                    helperText="Ethereum address of the NFT contract"
                                     variant="outlined"
                                     style={{width: '456px', maxWidth: '100%'}}
+                                />
+                                <Field
+                                    component={TextField}
+                                    name="hash"
+                                    type="name"
+                                    label="Metadata IPFS Hash"
+                                    helperText="The IPFS hash of the token metadata"
+                                    variant="outlined"
+                                    style={{width: '456px', maxWidth: '100%', marginTop: 15}}
                                 />
                                 <br />
                                 <Field
                                     component={TextField}
-                                    type="symbol"
-                                    label="Symbol"
-                                    helperText="Short text that represents all NFTs within contract e.g. Ͼ or PUNK"
-                                    name="symbol"
+                                    type="text"
+                                    label="Mint To Address"
+                                    helperText="The address that the token should be minted into"
+                                    name="mintToAddress"
                                     variant="outlined"
                                     style={{width: '456px', maxWidth: '100%', marginTop: 15}}
                                 />
                                 <br />
                                 <Typography variant="subtitle2" style={{color: 'red', fontWeight: 'bold', marginTop: 10}} component="p">
-                                    WARNING: THIS DATA CAN NEVER BE CHANGED
+                                    WARNING: IPFS HASH CAN NOT BE CHANGED
                                 </Typography>
                                 <Button
                                     variant="contained"
@@ -188,34 +214,45 @@ const DeployPage = (props: RouteComponentProps) => {
                                     onClick={submitForm}
                                     style={{marginTop: 15, marginBottom: 15, width: '456px', maxWidth: '100%'}}
                                 >
-                                    Deploy ERC721
+                                    Mint ERC721
                                 </Button>
                             </>
                         }
-                        {(isAwaitingMetaMaskConfirmation || pendingContractDeploymentTransaction || contractDeploymentSuccessful) &&
+                        {(isAwaitingMetaMaskConfirmation || pendingMintTransaction || mintTransactionSuccessful) &&
                             <div>
                                 {isAwaitingMetaMaskConfirmation && `Please Check MetaMask`}
-                                {chainId && pendingContractDeploymentTransaction && typeof pendingContractDeploymentTransaction === "string" && 
-                                    <span>Pending Contract Deployment: <a style={{color: '#39bfff'}} href={getEtherscanLink(pendingContractDeploymentTransaction, 'tx', chainId)} target="_blank" rel="noreferrer noopener">View On Etherscan</a></span>
+                                {chainId && pendingMintTransaction && typeof pendingMintTransaction === "string" && 
+                                    <span>Pending Mint Transaction: <a style={{color: '#39bfff'}} href={getEtherscanLink(pendingMintTransaction, 'tx', chainId)} target="_blank" rel="noreferrer noopener">View On Etherscan</a></span>
                                 }
-                                {chainId && contractDeploymentSuccessful && typeof contractDeploymentSuccessful === "string" && 
+                                {chainId && mintTransactionSuccessful && typeof mintTransactionSuccessful === "string" && 
                                     <div style={{textAlign: 'center', display: 'flex', flexDirection: 'column'}}>
-                                        <span>Contract Deployment Successful: <a style={{color: '#39bfff'}} href={getEtherscanLink(contractDeploymentSuccessful, 'address', chainId)} target="_blank" rel="noreferrer noopener">View On Etherscan</a></span>
+                                        <span>Mint Transaction Successful: <a style={{color: '#39bfff'}} href={getEtherscanLink(mintTransactionSuccessful, 'tx', chainId)} target="_blank" rel="noreferrer noopener">View On Etherscan</a></span>
                                         <span style={{marginTop: 15}}>What's Next?</span>
+                                        {/* <Button
+                                            variant="contained"
+                                            color="primary"
+                                            disabled={isSubmitting}
+                                            onClick={() => history.push(`/mint/${mintTransactionSuccessful}`)}
+                                            style={{display: 'block', marginTop: 15, marginBottom: 15, width: '456px', maxWidth: '100%', marginLeft:'auto',marginRight:'auto'}}
+                                        >
+                                            View On OpenSea
+                                        </Button> */}
                                         <Button
                                             variant="contained"
                                             color="primary"
                                             disabled={isSubmitting}
-                                            onClick={() => history.push(`/mint/${contractDeploymentSuccessful}`)}
+                                            onClick={() => {
+                                                setMintTransactionSuccessful(false)
+                                            }}
                                             style={{display: 'block', marginTop: 15, marginBottom: 15, width: '456px', maxWidth: '100%', marginLeft:'auto',marginRight:'auto'}}
                                         >
-                                            Mint Token on New NFT Contract
+                                            Mint another NFT
                                         </Button>
                                         <Button
                                             variant="contained"
                                             color="primary"
                                             disabled={isSubmitting}
-                                            onClick={() => setContractDeploymentSuccessful(false)}
+                                            onClick={() => history.push(`/deploy`)}
                                             style={{display: 'block', width: '456px', maxWidth: '100%', marginLeft:'auto',marginRight:'auto'}}
                                         >
                                             Deploy another NFT contract
@@ -237,4 +274,4 @@ const DeployPage = (props: RouteComponentProps) => {
     )
 };
 
-export default withRouter(DeployPage);
+export default withRouter(MintPage);

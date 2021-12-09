@@ -27,7 +27,7 @@ const PageContainer = () => {
                 <Switch>
                     <Route path="/" exact render={(props) => homeRoute(props)} />
                     <Route path="/deploy" exact render={(props) => deployRoute(props)} />
-                    <Route path="/mint" exact render={(props) => mintRoute(props)} />
+                    {/* <Route path="/mint" exact render={(props) => mintRoute(props)} /> */}
                     <Route path="/mint/:tokenAddress" exact render={(props) => mintRoute(props)} />
                 </Switch>
             </div>
